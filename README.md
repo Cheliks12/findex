@@ -1,20 +1,65 @@
-# Text Search Indexer (findex) - Lab 01
+# Текстовий пошуковий індекс (findex)
 
-A modular text processing and tokenization pipeline built with Python and `uv`.
+Модульний конвеєр обробки текстів та токенізації, створений на Python за допомогою `uv`.
 
-## Project Structure
-- `src/findex/corpus.py`: Lazy document reader generator (`iter_documents`).
-- `src/findex/tokenize.py`: Streaming tokenizer with Unicode normalization (`NFC`) and `casefold`.
-- `src/findex/stats.py`: Streaming corpus statistics analyzer (memory and time efficient).
-- `src/findex/stats_greedy.py`: Greedy in-memory version for performance and memory comparison.
-- `tests/test_tokenize.py`: Unit tests for tokenization logic (`pytest`).
+---
 
-## Measurements Comparison
+## Lab 01 — Корпус, токенізація та пайплайн
+
+Модульна система для читання та токенізації текстів.
+
+### Структура проєкту
+- `src/findex/corpus.py`: Генератор для лінивого читання документів (`iter_documents`).
+- `src/findex/tokenize.py`: Потоковий токенізатор з унікодною нормалізацією (`NFC`) та `casefold`.
+- `src/findex/stats.py`: Потоковий аналізатор статистики корпусу (ефективний за пам'яттю та часом).
+- `src/findex/stats_greedy.py`: Жадібна версія у пам'яті для порівняння продуктивності.
+- `tests/test_tokenize.py`: Юніт-тести для логіки токенізації (`pytest`).
+
+### Порівняння вимірювань
 
 | Implementation             | Documents | Total Tokens | Peak Memory (MB) | Time (s) |
 | --------------             | --------- | ------------ | ---------------- | -------- |
 | Streaming (`stats.py`)     | 1         | 448          | 0.04 MB          | 0.0028 s |
 | Greedy (`stats_greedy.py`) | 1         | 448          | 0.04 MB          | 0.0020 s |
 
-### Where did the memory go in the greedy version?
-The greedy version allocates memory simultaneously for all file paths, reads all document strings into a single list (`documents`), and then expands all generated tokens into a massive global list (`all_tokens.extend`) before aggregation. This places heavy overhead on Python's memory manager and garbage collector, whereas the streaming version processes text lazily item-by-item, maintaining a minimal memory footprint.
+### Куди пішла пам'ять у жадібній версії?
+Жадібна версія виділяє пам'ять одночасно для всіх шляхів файлів, зчитує рядки всіх документів в єдиний список (`documents`), а потім розгортає всі згенеровані токени у масивний глобальний список (`all_tokens.extend`) перед агрегацією. Це створює велике навантаження на менеджер пам'яті Python та збирач сміття, тоді як потокова версія обробляє текст ліниво поелементно, зберігаючи мінімальне споживання пам'яті.
+
+---
+
+## Lab 02 — Інвертований індекс, словники, хешування та пам'ять
+
+Пошуковий движок з інвертованим індексом, булевим пошуком, моніторингом пам'яті (`tracemalloc`) та підтримкою кількох форматів серіалізації.
+
+### Результати бенчмарків пам'яті (Milestone M4)
+
+Порівняння споживання пам'яті при побудові індексу для трьох варіантів зберігання постінгів:
+
+| Спосіб зберігання постінгів | Пікова пам'ять (збирання) | Розмір файлу індексу | Час завантаження |
+|-----------------------------|--------------------------|----------------------|------------------|
+| `list[Posting]` зі звичайним `@dataclass` | 0.0685 МБ | ~1.2 КБ | ~0.0012 с |
+| `list[Posting]` з `slots=True` | 0.0554 МБ | ~1.2 КБ | ~0.0010 с |
+| Пари `array('I')` (doc_ids, tfs) — без об'єктів | 0.0856 МБ | ~1.4 КБ | ~0.0015 с |
+
+### Куди пішли байти (Reflection):
+Використання параметру `slots=True` суттєво зменшує накладні витрати на кожен екземпляр `Posting`, оскільки Python не виділяє окремий словник (`__dict__`) для зберігання атрибутів кожного об'єкта окремо. Звичайний `@dataclass` створює `__dict__` для кожного екземпляра, що збільшує споживання оперативної пам'яті. Варіант з `array('I')` оперує сирими числовими C-масивами без зайвих обгорток об'єктів, проте на невеликих корпусах текстів накладні витрати на структуру `defaultdict` та словники метадокументів переважають економію від самих числових масивів.
+
+### Бенчмарк пошуку: Merge vs Set
+
+Порівняння двох рушіїв булевого пошуку (`--engine merge` проти `--engine set`):
+- **Merge engine**: реалізує двовкажівниковий обхід (`two-pointer merge`) по відсортованих списках постінгів. Працює ефективно за рахунок лінійної складності без побудови проміжних колекцій у пам'яті.
+- **Set engine**: використовує перетин множин (`set.intersection`). Код простіший, але створення проміжних об'єктів `set` створює додаткове навантаження на систему.
+
+### Серіалізація (Pickle vs JSON)
+- **Pickle**: швидкий бінарний формат для збереження складних структур об'єктів Python. *Важливо*: завантаження недовірених `pickle`-файлів небезпечне (Arbitrary Code Execution), оскільки десеріалізація може виконувати довільний код.
+- **JSON**: текстовий формат, зручний для читання людиною, але потребує конвертації типів, через що працює повільніше та має більший розмір файлу.
+
+### Використання CLI (Lab 02)
+
+1. Побудування та збереження індексу:
+   ```cmd
+   python -m findex.index data/ --out index.bin
+2.Пошук за запитом з вибором рушія:
+   python -m findex.search index.bin "term1 AND term2" --engine merge
+3.python -m findex.benchmark_search
+   python -m findex.benchmark_search
